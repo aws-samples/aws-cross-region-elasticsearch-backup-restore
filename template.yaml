@@ -1,0 +1,287 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Generates Stack to create state machine that peridically backupa and restores ES indicies from one domain to another.
+
+Parameters:
+  SnapShotRepositoryName:
+    Type: String
+    Description: Name of the snapshot repository that will be registered to ES. Refer https://www.elastic.co/guide/en/elasticsearch/reference/current/snapshots-register-repository.html
+    Default: es-manual-snapshots-repo
+  SourceEsDomainName:
+    Type: String
+    Description: Name of Source ES cluster
+  SourceEsClusterEndpoint:
+    Type: String
+    Description: Endpoint Url of the Source ES cluster in that environment
+  DestinationRegion:
+    Type: String
+    Description: Region in which the destination ES cluster exits
+  DestinationEsDomainName:
+    Type: String
+    Description: Name of destination ES cluster
+  DestinationEsClusterEndpoint:
+    Type: String
+    Description: Endpoint Url of the Destination ES cluster in that environemnt
+  StateMachineCronSchedule:
+    Description: Cron schedule to execute statemachine everyday e.g on-demand cron(0 1 * * *) for daily at 1am
+    Type: String
+  EsOwnerArn:
+    Description: Arn of the user or federated role that has read write access to both ES domains. This is user/role is required to assume EsSnapShotPassRole and send AWS sig4 signed HTTP request to register the snapshot S3 bucket with the source & destination ES domains.
+    Type: String
+  LogRetentionInDays:
+    Description: Number of Days Lambda & StepFunction logs will be retained.
+    Type: Number
+
+
+Resources:
+
+  AlarmsSnsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: BackRestoreFailedSnsTopic
+      TopicName: BackRestoreFailedSnsTopic
+
+  EsSnapShotBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      AccessControl: Private
+      LifecycleConfiguration:
+        Rules:
+        - Id: DeleteInFourteenDays
+          AbortIncompleteMultipartUpload:
+            DaysAfterInitiation: 1
+          Prefix: ''
+          Status: Enabled
+          ExpirationInDays: 14
+
+  EsSnapShotPassRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+              - !Ref EsOwnerArn
+              Service:
+              - es.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: esRoletoPerformSnapshot
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:*
+                Resource:
+                  - !Sub 'arn:aws:s3:::${EsSnapShotBucket}'
+                  - !Sub 'arn:aws:s3:::${EsSnapShotBucket}/*'
+
+  EsBackupFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${EsBackupFunction}"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  EsBackupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./dist/es-backup-scheduler
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Description: The lambda function registers a snapshot in the source domain.
+      MemorySize: 512
+      Timeout: 900
+      Tracing: Active
+      Environment:
+        Variables:
+          AWS_NODEJS_CONNECTION_REUSE_ENABLED: 1
+          SourceEsClusterEndpoint: !Ref SourceEsClusterEndpoint
+          SnapRepositoryName: !Ref SnapShotRepositoryName
+      Policies:
+        - Statement:
+          - Action:
+              - logs:*
+              - cloudwatch:*
+            Effect: Allow
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: !GetAtt EsSnapShotPassRole.Arn
+          - Effect: Allow
+            Action:
+              - sns:Publish
+            Resource: !Ref AlarmsSnsTopic
+          - Sid: EsWriteReadAccessAPI
+            Effect: Allow
+            Action:
+              - es:Describe*
+              - es:List*
+              - es:ESHttpGet
+              - es:ESHttpHead
+              - es:ESHttpPost
+              - es:ESHttpPut
+            Resource:
+              - !Sub arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/${SourceEsDomainName}
+
+  EsValidateSnapShotStatusFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${EsValidateSnapShotStatusFunction}"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  EsValidateSnapShotStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./dist/es-snapshot-validate-state
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Description: This lambda validates if the snapshot is complete in the source domain.
+      MemorySize: 512
+      Timeout: 900
+      Tracing: Active
+      Environment:
+        Variables:
+          AWS_NODEJS_CONNECTION_REUSE_ENABLED: 1
+          SourceEsClusterEndpoint: !Ref SourceEsClusterEndpoint
+          SnapRepositoryName: !Ref SnapShotRepositoryName
+      Policies:
+        - Statement:
+            - Action:
+                - cloudwatch:*
+                - logs:*
+              Effect: Allow
+              Resource: '*'
+            - Action:
+                - es:Describe*
+                - es:List*
+                - es:ESHttpGet
+                - es:ESHttpHead
+                - es:ESHttpPost
+                - es:ESHttpPut
+              Effect: Allow
+              Resource:
+                - !Sub arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/${SourceEsDomainName}
+
+  EsRestoreFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${EsRestoreFunction}"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  EsRestoreFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./dist/es-snapshot-restore
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Description: The lambda restores the snapshot in the destination domain.
+      MemorySize: 3008
+      Timeout: 900
+      Tracing: Active
+      Environment:
+        Variables:
+          DestinationEsClusterEndpoint: !Ref DestinationEsClusterEndpoint
+          SnapRepositoryName: !Ref SnapShotRepositoryName
+      Policies:
+        - Statement:
+            - Action:
+                - cloudwatch:*
+              Effect: Allow
+              Resource: '*'
+            - Sid: EsWriteReadAccessAPI
+              Effect: Allow
+              Action:
+                - es:Describe*
+                - es:List*
+                - es:ESHttpGet
+                - es:ESHttpHead
+                - es:ESHttpPost
+                - es:ESHttpPut
+              Resource:
+                - !Sub arn:${AWS::Partition}:es:${DestinationRegion}:${AWS::AccountId}:domain/${DestinationEsDomainName}
+
+  ESBackupRestoreStateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: !Ref LogRetentionInDays
+
+  ESBackupRestoreStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine/es-bkup-orchestrator.asl.json
+      DefinitionSubstitutions:
+        EsBackupFunctionArn: !GetAtt EsBackupFunction.Arn
+        EsValidateSnapShotStatusFunctionsArn: !GetAtt EsValidateSnapShotStatusFunction.Arn
+        EsRestoreFunctionFunctionArn: !GetAtt EsRestoreFunction.Arn
+        AlarmsSnsTopic: !Ref AlarmsSnsTopic
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt ESBackupRestoreStateMachineLogGroup.Arn
+        IncludeExecutionData: false
+        Level: ERROR
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Description: Schedule to run the es backup state machine every day
+            Enabled: True
+            Schedule: !Ref StateMachineCronSchedule
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref EsBackupFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref EsValidateSnapShotStatusFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref EsRestoreFunction
+        - SNSPublishMessagePolicy:
+            TopicName: !Ref AlarmsSnsTopic
+        - CloudWatchLogsFullAccess
+
+  ESBackupRestoreStateMachineExecutionsFailedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions:
+        - Ref: AlarmsSnsTopic
+      AlarmDescription: Alarm if ESBackupRestoreStateMachine errors out at least once 5 min duration
+      AlarmName:
+        Fn::Join:
+          - "-"
+          - - ESBackupRestoreStateMachine
+            - ExecutionsFailed
+      Namespace: AWS/States
+      MetricName: ExecutionsFailed
+      Dimensions:
+        - Name: StateMachineArn
+          Value: !Ref ESBackupRestoreStateMachine
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Unit: Count
+
+Outputs:
+  EsSnapShotBucketName:
+    Description: Name of the S3 bucket that stores ES backup snapshots
+    Export:
+      Name: EsSnapShotBucketName
+    Value: !Ref EsSnapShotBucket
+  EsSnapShotRepoName:
+    Description: Name of the Repo associated ES backup snapshots
+    Export:
+      Name: EsSnapShotRepoName
+    Value: !Ref SnapShotRepositoryName
+  EsSnapShotPassRoleArn:
+    Description: Role assumed by ES to perform
+    Export:
+      Name: EsSnapShotPassRoleArn
+    Value: !GetAtt EsSnapShotPassRole.Arn

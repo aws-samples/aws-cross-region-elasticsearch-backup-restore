@@ -1,0 +1,26 @@
+{
+  "name": "es-snapshot-restore",
+  "version": "1.0.0",
+  "description": "Restore the daily snapshot to the ES domain in secondary region",
+  "main": "index.js",
+  "dependencies": {
+    "@acuris/aws-es-connection": "2.1.0",
+    "@elastic/elasticsearch": "7.9.1",
+    "@types/aws-lambda": "^8.10.72",
+    "aws-sdk": "^2.633.0",
+    "quicktype": "^15.0.245"
+  },
+  "scripts": {
+    "prebuild": "rm -rf ../../dist/es-snapshot-restore && mkdir -p ../../dist/es-snapshot-restore || true",
+    "build": "npm i && npm run copy-package-json && npm run copy-dependencies && tsc",
+    "dev": "tsc",
+    "copy-package-json": "cp package.json ../../dist/es-snapshot-restore/package.json",
+    "copy-dependencies": "cpx \"./node_modules/**/*\" ../../dist/es-snapshot-restore/node_modules && cpx \"./data/*.txt\" ../../dist/es-snapshot-restore/data"
+  },
+  "devDependencies": {
+    "@types/node": "^13.13.10",
+    "cpx": "^1.5.0",
+    "ts-node": "^8.10.2",
+    "typescript": "^3.7.5"
+  }
+}

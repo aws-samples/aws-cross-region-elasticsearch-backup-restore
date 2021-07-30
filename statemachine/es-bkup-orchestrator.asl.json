@@ -1,0 +1,64 @@
+{
+    "Comment": "A state machine that takes snapshot os ES into S3 daily in the primary region",
+    "StartAt": "Initiate Snapshot",
+    "States": {
+        "Initiate Snapshot": {
+            "Type": "Task",
+            "Resource": "${EsBackupFunctionArn}",
+            "ResultPath": "$.taskresult",
+            "Next": "Validate Snapshot Completion",
+            "Catch": [
+                {
+                  "ErrorEquals": [ "States.ALL" ],
+                  "Next": "Send error message to SNS"
+                }
+              ]
+        },
+        "Validate Snapshot Completion": {
+            "Type": "Task",
+            "Resource": "${EsValidateSnapShotStatusFunctionsArn}",
+            "ResultPath": "$.taskresult",
+            "Next": "Restore Snapshot",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "States.TaskFailed"
+                    ],
+                    "IntervalSeconds": 300,
+                    "MaxAttempts": 5,
+                    "BackoffRate": 2.5
+                }
+            ],
+            "Catch": [
+                {
+                  "ErrorEquals": [ "States.ALL" ],
+                  "Next": "Send error message to SNS"
+                }
+              ]
+        },
+        "Restore Snapshot": {
+          "Type": "Task",
+          "Resource": "${EsRestoreFunctionFunctionArn}",
+          "Catch": [
+            {
+              "ErrorEquals": [ "States.ALL" ],
+              "Next": "Send error message to SNS"
+            }
+          ],
+          "End": true
+        },
+        "Send error message to SNS":{
+            "Type":"Task",
+            "Resource":"arn:aws:states:::sns:publish",
+            "Parameters":{  
+               "TopicArn":"${AlarmsSnsTopic}",
+               "Subject": "[ERROR]: ES Restore Task failed",
+               "Message": {
+                "Alarm": "ES Backup Restore job invoked by scheduler failed due to following reason",
+                "Error.$": "$.Cause"
+              }
+            },
+            "End": true
+         }
+    }
+}

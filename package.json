@@ -1,0 +1,13 @@
+{
+  "name": "esbackup-restore",
+  "version": "1.0.0",
+  "description": "es-backup-scheduler build file",
+  "scripts": {
+    "build": "npm run build-es-backup-scheduler && npm run build-es-snapshot-validate-state && npm run build-es-snapshot-restore",
+    "build-es-backup-scheduler": "cd src/es-backup-scheduler && npm run build && cd ../../",
+    "build-es-snapshot-validate-state": "cd src/es-snapshot-validate-state && npm run build && cd ../../",
+    "build-es-snapshot-restore": "cd src/es-snapshot-restore && npm run build && cd ../../"
+  },
+  "author": "wfm",
+  "license": "ISC"
+}

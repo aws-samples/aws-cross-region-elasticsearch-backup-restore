@@ -1,0 +1,27 @@
+{
+  "name": "es-backup-scheduler",
+  "version": "1.0.0",
+  "description": "Starts a snapshot in  primary region",
+  "main": "index.js",
+  "dependencies": {
+    "@acuris/aws-es-connection": "2.1.0",
+    "@elastic/elasticsearch": "7.9.1",
+    "@types/aws-lambda": "^8.10.72",
+    "@types/node": "^13.13.5",
+    "aws-sdk": "^2.633.0",
+    "quicktype": "^15.0.245"
+  },
+  "scripts": {
+    "prebuild": "rm -rf ../../dist/es-backup-scheduler && mkdir -p ../../dist/es-backup-scheduler || true",
+    "build": "npm i && npm run copy-package-json && npm run copy-dependencies && tsc",
+    "dev": "tsc",
+    "copy-package-json": "cp package.json ../../dist/es-backup-scheduler/package.json",
+    "copy-dependencies": "cpx \"./node_modules/**/*\" ../../dist/es-backup-scheduler/node_modules"
+  },
+  "devDependencies": {
+    "@types/node": "^13.13.10",
+    "cpx": "^1.5.0",
+    "ts-node": "^8.10.2",
+    "typescript": "^3.7.5"
+  }
+}

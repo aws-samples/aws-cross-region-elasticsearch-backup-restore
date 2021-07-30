@@ -1,0 +1,13 @@
+{
+    "compilerOptions": {
+      "target": "es2017",                          /* Specify ECMAScript target version: 'ES3' (default), 'ES5', 'ES2015', 'ES2016', 'ES2017', 'ES2018', 'ES2019' or 'ESNEXT'. */
+      "module": "commonjs",
+      "esModuleInterop": true,
+      "strict": false,
+      "noEmitOnError": true,
+      "outDir": "../../dist/es-snapshot-restore",
+      "typeRoots": ["./node_modules/@types"]
+    },
+    "include": ["."],
+    "exclude": ["node_modules", "**/*.spec.ts"]
+  }
