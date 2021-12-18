@@ -4,7 +4,7 @@ This project creates a State machine that does daily automated Backup Restore of
 
 ## How it works:
 
-![ES Backup Restore](EsbackUpRestore.png)
+![ES Backup Restore](docs/EsBackupRestore.png)
 
 - The step function calls es-backup-scheduler lambda to initiate a snapshot from the source ES domain into the registered s3 bucket.
 - es-snapshot-validate-state loops until the snapshot creation is complete.
