@@ -24,7 +24,7 @@ payload = {
 
 headers = {"Content-Type": "application/json"}
 
-r = requests.put(url, auth=awsauth, json=payload, headers=headers, verify=False)
+r = requests.put(url, auth=awsauth, json=payload, headers=headers, verify=True)
 
 print(r.status_code)
 print(r.text)
